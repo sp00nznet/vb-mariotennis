@@ -30,7 +30,7 @@ static bool on_frame(void) {
         printf("*** STATE CHANGE: %d -> %d (frame %d)\n", last_state, cur_state, frame_count);
         last_state = cur_state;
     }
-    if (frame_count == 17 || frame_count % 300 == 1) {
+    if (frame_count <= 20 || frame_count % 300 == 1) {
         /* Dump first few world attributes */
         printf("  World attrs: ");
         for (int w = 0; w < 4; w++) {
@@ -42,6 +42,10 @@ static bool on_frame(void) {
             printf("[%d: h=%04X gx=%d gy=%d gp=%04X] ", w, head, (int16_t)gx, (int16_t)gy, gp);
         }
         printf("\n");
+    }
+    if (frame_count % 120 == 1) {
+        uint8_t counter_2285 = vb_mem_read8(0x05002285);
+        printf("  counter@2285=%d\n", counter_2285);
     }
     if (frame_count % 60 == 1) {
         uint16_t state = vb_mem_read16(0x0500000C);
@@ -126,6 +130,18 @@ int main(int argc, char **argv) {
     vb_interrupt_set_handler(VB_INT_TIMER, vb_func_07F80024);
     vb_interrupt_set_handler(VB_INT_VIP,   vb_func_07F800AA);
 
+    /* Set fast frame ticks so VIP status updates happen quickly during init */
+    vb_interrupt_set_frame_ticks(1000);
+
+    /* Pre-set VIP status so state handlers don't poll forever */
+    vb_vip_frame_advance();
+
+    /* Set frame sync flag that the VIP interrupt handler would normally set.
+     * WRAM[0x05000018] and [0x0500001A] are frame counters/flags. */
+    vb_mem_write16(0x05000018, 1);
+    vb_mem_write16(0x0500001A, 1);
+    vb_mem_write16(0x0500001C, 1);
+
     /* Set up frame timing and callback */
     vb_interrupt_set_frame_ticks(20000);
     vb_interrupt_set_frame_callback(on_frame);
@@ -140,38 +156,55 @@ int main(int argc, char **argv) {
     printf("Starting game...\n");
     fflush(stdout);
 
-    /* The entry point sets up the system and enters the main game loop.
-     * It returns when hitting an unresolved code path (state handler stubs
-     * JR back to the main loop but that JR becomes a return).
-     *
-     * We implement the main loop here: read state, dispatch handler, repeat. */
-    vb_func_07F80120();  /* Initial setup: clear WRAM, init, set state=0 */
+    /* Run entry point: sets up WRAM, clears VRAM, calls init */
+    vb_func_07F80120();
 
-    printf("Init complete. Running main game loop...\n");
+    printf("Init complete (state=%d). Running game loop...\n",
+           vb_mem_read16(0x0500000C) & 0xF);
     fflush(stdout);
 
-    /* Game main loop - mirrors what 0x07F801F4 does */
-    while (1) {
-        uint16_t state = vb_mem_read16(0x0500000C) & 0xF;
-        if (state > 14) continue;  /* Invalid state, keep looping */
+    /* Run state handlers sequentially to load game data */
+    printf("Running state 0 (init)...\n"); fflush(stdout);
+    vb_func_07F81940();
 
-        /* Dispatch state handler (same as the ROM's state stubs) */
-        switch (state) {
-        case  0: vb_func_07F81940(); break;
-        case  1: vb_func_07F8A912(); break;
-        case  2: vb_func_07F8EF3A(); break;
-        case  3: vb_func_07F909DC(); break;
-        case  4: vb_func_07F81B98(); break;
-        case  5: vb_func_07F869D0(); break;
-        case  6: vb_func_07F8714A(); break;
-        case  7: vb_func_07F8D794(); break;
-        case  8: vb_func_07F92D62(); break;
-        case  9: vb_func_07F92FCC(); break;
-        case 10: vb_func_07F93576(); break;
-        case 11: vb_func_07F94FE0(); break;
-        case 12: vb_func_07F95C32(); break;
-        default: break;
+    printf("Running state 1 (logo setup)...\n"); fflush(stdout);
+    vb_func_07F8A912();
+
+    /* Force state to 2 and run tile data loader */
+    printf("Running state 2 (tile data load)...\n"); fflush(stdout);
+    vb_mem_write16(0x0500000C, 2);
+    vb_func_07F8EF3A();
+
+    printf("Running state 3...\n"); fflush(stdout);
+    vb_mem_write16(0x0500000C, 3);
+    vb_func_07F909DC();
+
+    printf("Running state 4...\n"); fflush(stdout);
+    vb_mem_write16(0x0500000C, 4);
+    vb_func_07F81B98();
+
+    /* Check VRAM state after running handlers */
+    {
+        int chr = 0, bg = 0, wld = 0, oam = 0;
+        for (int i = 0; i < 0x40000; i += 4) {
+            uint32_t v = vb_mem_read32(0x00000000 + i);
+            if (v == 0) continue;
+            if (i >= 0x06000 && i < 0x10000) chr++;
+            else if (i >= 0x20000 && i < 0x3D800) bg++;
+            else if (i >= 0x3D800 && i < 0x3E000) wld++;
+            else if (i >= 0x3E000) oam++;
         }
+        printf("Final VRAM: CHR=%d BG=%d WLD=%d OAM=%d\n", chr, bg, wld, oam);
+    }
+
+    /* Render and display */
+    vb_vip_render(framebuffer, 0);
+    vb_platform_present(framebuffer);
+    printf("Window open. Close to exit.\n");
+    fflush(stdout);
+    while (vb_platform_poll()) {
+        vb_vip_render(framebuffer, 0);
+        vb_platform_present(framebuffer);
     }
 
     printf("Game exited after %d frames\n", frame_count);
