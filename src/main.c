@@ -54,13 +54,46 @@ int main(int argc, char **argv) {
     vb_interrupt_set_handler(VB_INT_TIMER, vb_func_07F80024);
     vb_interrupt_set_handler(VB_INT_VIP,   vb_func_07F800AA);
 
+    /* Initialize platform (SDL2 window) */
+    if (!vb_platform_init("Mario's Tennis - vbrecomp", 2)) {
+        fprintf(stderr, "Warning: could not init platform, running headless\n");
+    }
+
     printf("Starting execution at entry point...\n");
 
-    /* Call the entry point (the recompiled reset handler) */
+    /* Call the entry point (the recompiled reset handler).
+     * This sets up WRAM and then calls the game's init/main loop. */
     vb_func_07F80120();
 
     printf("Entry point returned.\n");
+    printf("Registers after return:\n");
+    printf("  r3(sp)=%08X r4(gp)=%08X r31(lp)=%08X\n",
+           vb_cpu.r[3], vb_cpu.r[4], vb_cpu.r[31]);
+    printf("  PSW=%08X PC=%08X\n",
+           vb_cpu.sr[5], vb_cpu.pc);
 
+    /* Even though the recompiled code returned early (missing functions),
+     * let's render whatever is in VRAM and display it */
+    uint32_t framebuffer[384 * 224];
+    vb_vip_render(framebuffer, 0); /* Left eye */
+
+    /* Show the frame for a few seconds so we can see if anything is there */
+    if (vb_platform_poll()) {
+        vb_platform_present(framebuffer);
+
+        /* Wait for user to close window */
+        printf("Window open. Close it or press Ctrl+C to exit.\n");
+        bool running = true;
+        while (running) {
+            running = vb_platform_poll();
+
+            /* Re-render each frame in case VIP state changed */
+            vb_vip_render(framebuffer, 0);
+            vb_platform_present(framebuffer);
+        }
+    }
+
+    vb_platform_shutdown();
     vb_shutdown();
     free(rom);
     return 0;
