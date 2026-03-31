@@ -1,1 +1,4 @@
 *.zip
+*.vb
+build/
+.vs/
