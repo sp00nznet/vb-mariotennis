@@ -10,6 +10,48 @@
 
 static uint32_t framebuffer[384 * 224];
 static int frame_count = 0;
+static bool on_frame(void); /* forward declaration */
+
+/*
+ * HLE replacement for vb_func_07F8016C — the frame sync / VBlank wait function.
+ *
+ * The original code:
+ *   1. Clears WRAM[0x0500000E] to 0
+ *   2. Polls until it becomes nonzero (set by VIP interrupt handler)
+ *   3. Returns
+ *
+ * Our replacement: advance one frame, run the VIP interrupt handler
+ * directly, then return. This avoids the polling loop entirely.
+ */
+void vb_func_07F8016C(void) {
+    /* Clear the frame flag (like the original) */
+    vb_mem_write16(0x0500000E, 0);
+
+    /* Advance VIP state and fire the interrupt handler directly */
+    vb_vip_frame_advance();
+
+    /* Re-enable VIP interrupts (the handler clears INTENB) */
+    vb_mem_write16(0x0005F802, 0x4018);
+
+    /* Call the VIP interrupt handler directly to set frame flags */
+    vb_func_07F800AA();
+
+    /* Restore PSW after interrupt handler (it does RETI internally) */
+
+    /* Call frame callback for rendering/input */
+    frame_count++;
+    on_frame();
+}
+
+/*
+ * HLE replacement for vb_func_07F80186 — XPSTTS wait function.
+ *
+ * The original polls XPSTTS bits 2-5 until nonzero.
+ * We just return immediately since drawing is instantaneous.
+ */
+void vb_func_07F80186(void) {
+    /* Nothing to wait for — drawing is instant in recomp */
+}
 
 /* Called once per frame from within the game loop */
 static bool on_frame(void) {
@@ -56,8 +98,10 @@ static bool on_frame(void) {
             uint32_t v = vb_mem_read32(0x00000000 + i);
             if (v == 0) continue;
             vram_nonzero++;
-            if (i >= 0x06000 && i < 0x08000) chr_nonzero++;
-            else if (i >= 0x0E000 && i < 0x10000) chr_nonzero++;
+            if ((i >= 0x06000 && i < 0x08000) ||
+                (i >= 0x0E000 && i < 0x10000) ||
+                (i >= 0x16000 && i < 0x18000) ||
+                (i >= 0x1E000 && i < 0x20000)) chr_nonzero++;
             else if (i >= 0x20000 && i < 0x3D800) bgmap_nonzero++;
             else if (i >= 0x3D800 && i < 0x3E000) world_nonzero++;
             else if (i >= 0x3E000 && i < 0x40000) oam_nonzero++;
