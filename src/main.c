@@ -130,17 +130,11 @@ int main(int argc, char **argv) {
     vb_interrupt_set_handler(VB_INT_TIMER, vb_func_07F80024);
     vb_interrupt_set_handler(VB_INT_VIP,   vb_func_07F800AA);
 
-    /* Set fast frame ticks so VIP status updates happen quickly during init */
-    vb_interrupt_set_frame_ticks(1000);
+    /* Disable frame ticks during init to avoid interrupts corrupting setup */
+    vb_interrupt_set_frame_ticks(0);
 
-    /* Pre-set VIP status so state handlers don't poll forever */
-    vb_vip_frame_advance();
-
-    /* Set frame sync flag that the VIP interrupt handler would normally set.
-     * WRAM[0x05000018] and [0x0500001A] are frame counters/flags. */
-    vb_mem_write16(0x05000018, 1);
-    vb_mem_write16(0x0500001A, 1);
-    vb_mem_write16(0x0500001C, 1);
+    /* Don't pre-fire VIP frame advance — let it happen naturally
+     * via frame ticks after init completes */
 
     /* Set up frame timing and callback */
     vb_interrupt_set_frame_ticks(20000);
@@ -156,12 +150,22 @@ int main(int argc, char **argv) {
     printf("Starting game...\n");
     fflush(stdout);
 
-    /* Run entry point: sets up WRAM, clears VRAM, calls init */
+    /* Run entry point: sets up WRAM, clears VRAM, calls init.
+     * The entry point never returns (main game loop), so when it does,
+     * either it hit a stub or completed init and the state machine ran. */
     vb_func_07F80120();
+    printf("Entry point returned! SP=0x%08X r31=0x%08X state=%d\n",
+           vb_cpu.r[3], vb_cpu.r[31], vb_mem_read16(0x0500000C) & 0xF);
 
-    printf("Init complete (state=%d). Running game loop...\n",
+    printf("Init complete (state=%d). Enabling interrupts...\n",
            vb_mem_read16(0x0500000C) & 0xF);
     fflush(stdout);
+
+    /* NOW enable frame ticks — init is done, interrupts are safe.
+     * Use a large value to avoid overwhelming the game with interrupts.
+     * VB runs ~20MHz / 50fps = ~400K cycles per frame. Each interrupt check
+     * is roughly 1-5 instructions = 200K-80K checks per frame. */
+    vb_interrupt_set_frame_ticks(100000);
 
     /* Run state handlers sequentially to load game data */
     printf("Running state 0 (init)...\n"); fflush(stdout);
