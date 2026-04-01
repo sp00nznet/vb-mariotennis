@@ -12,6 +12,18 @@ static uint32_t framebuffer[384 * 224];
 static int frame_count = 0;
 static bool on_frame(void); /* forward declaration */
 
+/* Trace wrapper for tile decompression function */
+extern void vb_func_07F8135C_real(void);
+void vb_func_07F8135C(void) {
+    static int call_count = 0;
+    call_count++;
+    if (call_count <= 10) {
+        fprintf(stderr, "TILE COPY called #%d: dst=0x%08X src=0x%08X size=0x%X\n",
+                call_count, vb_cpu.r[7], vb_cpu.r[6], vb_cpu.r[8]);
+    }
+    vb_func_07F8135C_real();
+}
+
 /*
  * HLE replacement for vb_func_07F8016C — the frame sync / VBlank wait function.
  *
@@ -64,6 +76,35 @@ static bool on_frame(void) {
     /* Render VIP to framebuffer and present */
     vb_vip_render(framebuffer, 0);
     vb_platform_present(framebuffer);
+
+    /* Dump VRAM once at frame 500 */
+    if (frame_count == 500) {
+        FILE *vf = fopen("vram_dump.txt", "w");
+        if (vf) {
+            fprintf(vf, "VRAM dump at frame %d (state=%d):\n", frame_count,
+                    vb_mem_read16(0x0500000C) & 0xF);
+            for (int region = 0; region < 64; region++) {
+                int base = region * 0x1000;
+                int nonzero = 0;
+                for (int i = 0; i < 0x1000; i += 2) {
+                    if (vb_mem_read16(base + i) != 0) nonzero++;
+                }
+                if (nonzero > 0) {
+                    fprintf(vf, "  0x%05X: %4d nonzero\n", base, nonzero);
+                }
+            }
+            fclose(vf);
+        }
+        /* Write raw VRAM binary */
+        FILE *bf = fopen("vram_raw.bin", "wb");
+        if (bf) {
+            for (int i = 0; i < 0x40000; i++) {
+                uint8_t b = vb_mem_read8(i);
+                fwrite(&b, 1, 1, bf);
+            }
+            fclose(bf);
+        }
+    }
 
     /* Log state changes and progress */
     static uint16_t last_state = 0xFFFF;
@@ -231,6 +272,36 @@ int main(int argc, char **argv) {
     vb_mem_write16(0x0500000C, 4);
     vb_func_07F81B98();
 
+    /* Dump VRAM to file for analysis */
+    {
+        FILE *vf = fopen("vram_dump.txt", "w");
+        if (vf) {
+            fprintf(vf, "VRAM dump by 4KB region:\n");
+            for (int region = 0; region < 64; region++) {
+                int base = region * 0x1000;
+                int nonzero = 0;
+                for (int i = 0; i < 0x1000; i += 2) {
+                    if (vb_mem_read16(base + i) != 0) nonzero++;
+                }
+                if (nonzero > 0) {
+                    fprintf(vf, "  0x%05X-0x%05X: %d nonzero halfwords\n", base, base + 0xFFF, nonzero);
+                }
+            }
+            /* Also dump raw VRAM as binary for inspection */
+            fclose(vf);
+
+            FILE *bf = fopen("vram_raw.bin", "wb");
+            if (bf) {
+                for (int i = 0; i < 0x40000; i++) {
+                    uint8_t b = vb_mem_read8(i);
+                    fwrite(&b, 1, 1, bf);
+                }
+                fclose(bf);
+            }
+            fprintf(stderr, "VRAM dumped to vram_dump.txt and vram_raw.bin\n");
+        }
+    }
+
     /* Check VRAM state after running handlers */
     {
         int chr = 0, bg = 0, wld = 0, oam = 0;
@@ -248,8 +319,6 @@ int main(int argc, char **argv) {
     /* Render and display */
     vb_vip_render(framebuffer, 0);
     vb_platform_present(framebuffer);
-    printf("Window open. Close to exit.\n");
-    fflush(stdout);
     while (vb_platform_poll()) {
         vb_vip_render(framebuffer, 0);
         vb_platform_present(framebuffer);
