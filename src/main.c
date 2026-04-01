@@ -77,12 +77,13 @@ static bool on_frame(void) {
     vb_vip_render(framebuffer, 0);
     vb_platform_present(framebuffer);
 
-    /* Dump VRAM once at frame 500 */
-    if (frame_count == 500) {
+    /* Dump VRAM once at frame 100 */
+    if (frame_count == 100) {
         FILE *vf = fopen("vram_dump.txt", "w");
         if (vf) {
             fprintf(vf, "VRAM dump at frame %d (state=%d):\n", frame_count,
                     vb_mem_read16(0x0500000C) & 0xF);
+            /* Coarse: 4KB blocks */
             for (int region = 0; region < 64; region++) {
                 int base = region * 0x1000;
                 int nonzero = 0;
@@ -93,6 +94,29 @@ static bool on_frame(void) {
                     fprintf(vf, "  0x%05X: %4d nonzero\n", base, nonzero);
                 }
             }
+            /* World attributes detail */
+            fprintf(vf, "\nWorld attributes (0x3D800):\n");
+            for (int w = 0; w < 32; w++) {
+                uint32_t wa = 0x3D800 + w * 32;
+                uint16_t head = vb_mem_read16(wa);
+                if (head != 0) {
+                    int16_t gx = (int16_t)vb_mem_read16(wa + 2);
+                    int16_t gy = (int16_t)vb_mem_read16(wa + 6);
+                    uint16_t ww = vb_mem_read16(wa + 14);
+                    uint16_t wh = vb_mem_read16(wa + 16);
+                    uint16_t param = vb_mem_read16(wa + 28);
+                    fprintf(vf, "  World %d: HEAD=%04X GX=%d GY=%d W=%d H=%d PARAM=%04X\n",
+                            w, head, gx, gy, ww, wh, param);
+                }
+            }
+            /* Palettes (read via bus) */
+            fprintf(vf, "\nPalettes: GPLT0=%04X GPLT1=%04X GPLT2=%04X GPLT3=%04X\n",
+                    vb_mem_read16(0x0005F830), vb_mem_read16(0x0005F832),
+                    vb_mem_read16(0x0005F834), vb_mem_read16(0x0005F836));
+            fprintf(vf, "BKCOL=%04X DPCTRL=%04X BRTA=%04X BRTB=%04X BRTC=%04X\n",
+                    vb_mem_read16(0x0005F840), vb_mem_read16(0x0005F812),
+                    vb_mem_read16(0x0005F814), vb_mem_read16(0x0005F816),
+                    vb_mem_read16(0x0005F818));
             fclose(vf);
         }
         /* Write raw VRAM binary */
