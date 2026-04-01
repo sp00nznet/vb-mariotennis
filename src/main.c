@@ -17,9 +17,9 @@ extern void vb_func_07F8135C_real(void);
 void vb_func_07F8135C(void) {
     static int call_count = 0;
     call_count++;
-    if (call_count <= 10) {
-        fprintf(stderr, "TILE COPY called #%d: dst=0x%08X src=0x%08X size=0x%X\n",
-                call_count, vb_cpu.r[7], vb_cpu.r[6], vb_cpu.r[8]);
+    if (call_count <= 30) {
+        fprintf(stderr, "TILE COPY #%d: dst=0x%08X src=0x%08X size=0x%X (frame %d)\n",
+                call_count, vb_cpu.r[7], vb_cpu.r[6], vb_cpu.r[8], frame_count);
     }
     vb_func_07F8135C_real();
 }
@@ -78,7 +78,7 @@ static bool on_frame(void) {
     vb_platform_present(framebuffer);
 
     /* Dump VRAM once at frame 100 */
-    if (frame_count == 110) {
+    if (frame_count == 300) {
         FILE *vf = fopen("vram_dump.txt", "w");
         if (vf) {
             fprintf(vf, "VRAM dump at frame %d (state=%d):\n", frame_count,
@@ -150,9 +150,15 @@ static bool on_frame(void) {
         }
         printf("\n");
     }
-    if (frame_count % 120 == 1) {
+    if (frame_count % 30 == 1) {
         uint8_t counter_2285 = vb_mem_read8(0x05002285);
-        printf("  counter@2285=%d\n", counter_2285);
+        uint16_t cur_st = vb_mem_read16(0x0500000C) & 0xF;
+        fprintf(stderr, "  F%d: counter=%d state=%d\n", frame_count, counter_2285, cur_st);
+        /* Force counter advancement if stuck */
+        if (frame_count > 200 && counter_2285 < 4 && cur_st == 1) {
+            vb_mem_write8(0x05002285, 4);
+            fprintf(stderr, "  ** Forced counter to 4\n");
+        }
     }
     if (frame_count % 60 == 1) {
         uint16_t state = vb_mem_read16(0x0500000C);
@@ -286,25 +292,31 @@ int main(int argc, char **argv) {
     vb_mem_write16(0x0005F83C, 0xE4); /* JPLT2 */
     vb_mem_write16(0x0005F83E, 0xE4); /* JPLT3 */
 
-    /* Run state handlers sequentially to load game data */
-    printf("Running state 0 (init)...\n"); fflush(stdout);
-    vb_func_07F81940();
-
-    printf("Running state 1 (logo setup)...\n"); fflush(stdout);
-    vb_func_07F8A912();
-
-    /* Force state to 2 and run tile data loader */
-    printf("Running state 2 (tile data load)...\n"); fflush(stdout);
-    vb_mem_write16(0x0500000C, 2);
-    vb_func_07F8EF3A();
-
-    printf("Running state 3...\n"); fflush(stdout);
-    vb_mem_write16(0x0500000C, 3);
-    vb_func_07F909DC();
-
-    printf("Running state 4...\n"); fflush(stdout);
-    vb_mem_write16(0x0500000C, 4);
-    vb_func_07F81B98();
+    /* Game main loop — dispatch state handlers until game progresses.
+     * Each handler runs for its duration (many frames with VBlank waits)
+     * then returns when the state changes. */
+    while (1) {
+        uint16_t state = vb_mem_read16(0x0500000C) & 0xF;
+        fprintf(stderr, "Dispatching state %d (frame %d)\n", state, frame_count);
+        switch (state) {
+        case  0: vb_func_07F81940(); break;
+        case  1: vb_func_07F8A912(); break;
+        case  2: vb_func_07F8EF3A(); break;
+        case  3: vb_func_07F909DC(); break;
+        case  4: vb_func_07F81B98(); break;
+        case  5: vb_func_07F869D0(); break;
+        case  6: vb_func_07F8714A(); break;
+        case  7: vb_func_07F8D794(); break;
+        case  8: vb_func_07F92D62(); break;
+        case  9: vb_func_07F92FCC(); break;
+        case 10: vb_func_07F93576(); break;
+        case 11: vb_func_07F94FE0(); break;
+        case 12: vb_func_07F95C32(); break;
+        default: break;
+        }
+        /* Reset SP to avoid stack drift */
+        vb_cpu.r[3] = 0x05003FD4;
+    }
 
     /* Dump VRAM to file for analysis */
     {
