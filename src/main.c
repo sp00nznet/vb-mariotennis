@@ -274,7 +274,7 @@ int main(int argc, char **argv) {
      * Use a large value to avoid overwhelming the game with interrupts.
      * VB runs ~20MHz / 50fps = ~400K cycles per frame. Each interrupt check
      * is roughly 1-5 instructions = 200K-80K checks per frame. */
-    vb_interrupt_set_frame_ticks(100000);
+    vb_interrupt_set_frame_ticks(20000);
 
     /* Run state handlers sequentially to load game data */
     printf("Running state 0 (init)...\n"); fflush(stdout);
