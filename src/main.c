@@ -78,7 +78,7 @@ static bool on_frame(void) {
     vb_platform_present(framebuffer);
 
     /* Dump VRAM once at frame 100 */
-    if (frame_count == 100) {
+    if (frame_count == 110) {
         FILE *vf = fopen("vram_dump.txt", "w");
         if (vf) {
             fprintf(vf, "VRAM dump at frame %d (state=%d):\n", frame_count,
@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
      * via frame ticks after init completes */
 
     /* Set up frame timing and callback */
-    vb_interrupt_set_frame_ticks(20000);
+    vb_interrupt_set_frame_ticks(5000);
     vb_interrupt_set_frame_callback(on_frame);
 
     /* Initialize SDL2 window */
@@ -274,7 +274,17 @@ int main(int argc, char **argv) {
      * Use a large value to avoid overwhelming the game with interrupts.
      * VB runs ~20MHz / 50fps = ~400K cycles per frame. Each interrupt check
      * is roughly 1-5 instructions = 200K-80K checks per frame. */
-    vb_interrupt_set_frame_ticks(20000);
+    vb_interrupt_set_frame_ticks(5000);
+
+    /* Force-set palettes for testing */
+    vb_mem_write16(0x0005F830, 0xE4); /* GPLT0: 3,2,1,0 */
+    vb_mem_write16(0x0005F832, 0xE4); /* GPLT1 */
+    vb_mem_write16(0x0005F834, 0xE4); /* GPLT2 */
+    vb_mem_write16(0x0005F836, 0xE4); /* GPLT3 */
+    vb_mem_write16(0x0005F838, 0xE4); /* JPLT0 */
+    vb_mem_write16(0x0005F83A, 0xE4); /* JPLT1 */
+    vb_mem_write16(0x0005F83C, 0xE4); /* JPLT2 */
+    vb_mem_write16(0x0005F83E, 0xE4); /* JPLT3 */
 
     /* Run state handlers sequentially to load game data */
     printf("Running state 0 (init)...\n"); fflush(stdout);
