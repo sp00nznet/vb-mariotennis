@@ -212,7 +212,7 @@ static bool on_frame(void) {
             vb_mem_write8(0x05002285, 4);
             fprintf(stderr, "  ** Forced counter to 4\n");
         }
-        /* Force state 2→4 if stuck too long */
+        /* Force state progression if stuck */
         if (frame_count > 500 && cur_st == 2) {
             vb_mem_write16(0x0500000C, 4);
             fprintf(stderr, "  ** Forced state to 4\n");
