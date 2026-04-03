@@ -21,33 +21,17 @@ void vb_func_07F8135C(void) {
     static int call_count = 0;
     call_count++;
     uint32_t dst = vb_cpu.r[7];
-    if (call_count <= 30) {
+    if (call_count <= 50) {
         fprintf(stderr, "TILE COPY #%d: dst=0x%08X src=0x%08X r8=0x%X (frame %d)\n",
                 call_count, dst, vb_cpu.r[6], vb_cpu.r[8], frame_count);
     }
 
-    /* Save world attrs + OAM if this decompress could overflow into them.
-     * Copy #11 writes to 0x7D000 (maps to 0x3D000) and bleeds past 0x3D800. */
-    bool protect = (dst >= 0x0007C000 && dst < 0x00080000) ||
-                   (dst >= 0x0003C000 && dst < 0x00040000);
-    if (protect) {
-        extern uint8_t *vb_vip_get_vram(void);
-        uint8_t *v = vb_vip_get_vram();
-        if (v) memcpy(decomp_saved_wa, &v[0x3D800], sizeof(decomp_saved_wa));
-    }
-
     vb_func_07F8135C_real();
 
-    if (protect) {
-        extern uint8_t *vb_vip_get_vram(void);
-        uint8_t *v = vb_vip_get_vram();
-        if (v) memcpy(&v[0x3D800], decomp_saved_wa, sizeof(decomp_saved_wa));
-    }
-
-    if (call_count <= 30) {
+    if (call_count <= 50) {
         uint32_t bytes_written = vb_cpu.r[7] - dst;
-        fprintf(stderr, "  -> wrote %d bytes (r7 now 0x%08X)%s\n",
-                bytes_written, vb_cpu.r[7], protect ? " [world/OAM protected]" : "");
+        fprintf(stderr, "  -> wrote %d bytes (r7 now 0x%08X)\n",
+                bytes_written, vb_cpu.r[7]);
     }
 }
 
@@ -227,6 +211,11 @@ static bool on_frame(void) {
         if (frame_count > 200 && counter_2285 < 4 && cur_st == 1) {
             vb_mem_write8(0x05002285, 4);
             fprintf(stderr, "  ** Forced counter to 4\n");
+        }
+        /* Force state 2→4 if stuck too long */
+        if (frame_count > 500 && cur_st == 2) {
+            vb_mem_write16(0x0500000C, 4);
+            fprintf(stderr, "  ** Forced state to 4\n");
         }
     }
     /* Simulate Start press at frame 600 to advance past loading */
