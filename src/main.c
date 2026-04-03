@@ -197,10 +197,10 @@ static bool on_frame(void) {
     if (frame_count % 30 == 1) {
         uint8_t counter_2285 = vb_mem_read8(0x05002285);
         uint16_t cur_st = vb_mem_read16(0x0500000C) & 0xF;
-        fprintf(stderr, "  F%d: counter=%d state=%d dpctrl=%04X brta=%02X wram18=%04X wram1A=%04X\n",
+        fprintf(stderr, "  F%d: counter=%d state=%d wram18=%04X wram1A=%04X flag2288=%08X\n",
                 frame_count, counter_2285, cur_st,
-                vb_mem_read16(0x0005F812), vb_mem_read16(0x0005F814),
-                vb_mem_read16(0x05000018), vb_mem_read16(0x0500001A));
+                vb_mem_read16(0x05000018), vb_mem_read16(0x0500001A),
+                vb_mem_read32(0x05002288));
         /* Force counter advancement if stuck */
         if (frame_count > 200 && counter_2285 < 4 && cur_st == 1) {
             vb_mem_write8(0x05002285, 4);
