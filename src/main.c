@@ -12,20 +12,42 @@ static uint32_t framebuffer[384 * 224];
 static int frame_count = 0;
 static bool on_frame(void); /* forward declaration */
 
-/* Trace wrapper for tile decompression function */
+/* Trace wrapper for tile decompression function.
+ * Protects world attributes (0x3D800) and OAM (0x3E000) from being
+ * overwritten when the decompression target overlaps those regions. */
 extern void vb_func_07F8135C_real(void);
+static uint8_t decomp_saved_wa[0x2800]; /* 0x3D800-0x3FFFF */
 void vb_func_07F8135C(void) {
     static int call_count = 0;
     call_count++;
-    uint32_t dst_before = vb_cpu.r[7];
+    uint32_t dst = vb_cpu.r[7];
     if (call_count <= 30) {
         fprintf(stderr, "TILE COPY #%d: dst=0x%08X src=0x%08X r8=0x%X (frame %d)\n",
-                call_count, vb_cpu.r[7], vb_cpu.r[6], vb_cpu.r[8], frame_count);
+                call_count, dst, vb_cpu.r[6], vb_cpu.r[8], frame_count);
     }
+
+    /* Save world attrs + OAM if this decompress could overflow into them.
+     * Copy #11 writes to 0x7D000 (maps to 0x3D000) and bleeds past 0x3D800. */
+    bool protect = (dst >= 0x0007C000 && dst < 0x00080000) ||
+                   (dst >= 0x0003C000 && dst < 0x00040000);
+    if (protect) {
+        extern uint8_t *vb_vip_get_vram(void);
+        uint8_t *v = vb_vip_get_vram();
+        if (v) memcpy(decomp_saved_wa, &v[0x3D800], sizeof(decomp_saved_wa));
+    }
+
     vb_func_07F8135C_real();
-    uint32_t bytes_written = vb_cpu.r[7] - dst_before;
+
+    if (protect) {
+        extern uint8_t *vb_vip_get_vram(void);
+        uint8_t *v = vb_vip_get_vram();
+        if (v) memcpy(&v[0x3D800], decomp_saved_wa, sizeof(decomp_saved_wa));
+    }
+
     if (call_count <= 30) {
-        fprintf(stderr, "  -> wrote %d bytes (r7 now 0x%08X)\n", bytes_written, vb_cpu.r[7]);
+        uint32_t bytes_written = vb_cpu.r[7] - dst;
+        fprintf(stderr, "  -> wrote %d bytes (r7 now 0x%08X)%s\n",
+                bytes_written, vb_cpu.r[7], protect ? " [world/OAM protected]" : "");
     }
 }
 
