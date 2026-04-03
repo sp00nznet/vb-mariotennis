@@ -59,7 +59,14 @@ void vb_func_07F8016C(void) {
     /* Call the VIP interrupt handler directly to set frame flags */
     vb_func_07F800AA();
 
-    /* Restore PSW after interrupt handler (it does RETI internally) */
+    /* Debug: check world 4 after handler */
+    static int dbg_w4 = 0;
+    if (frame_count > 250 && dbg_w4 < 20) {
+        uint16_t w4_head = vb_mem_read16(0x0003D880);
+        uint16_t w31_head = vb_mem_read16(0x0003DBE0);
+        fprintf(stderr, "POST-HANDLER F%d: W4=%04X W31=%04X\n", frame_count, w4_head, w31_head);
+        dbg_w4++;
+    }
 
     /* Call frame callback for rendering/input */
     on_frame();
@@ -248,21 +255,7 @@ static bool on_frame(void) {
             vb_mem_write8(0x05002285, 4);
             fprintf(stderr, "  ** Forced counter to 4\n");
         }
-        /* Force state progression if stuck too long */
-        if (frame_count > 400 && cur_st == 2) {
-            vb_mem_write16(0x0500000C, 4);
-            fprintf(stderr, "  ** Forced state 2->4\n");
-        }
-    }
-    /* Cycle through game states to find one with character rendering */
-    {
-        uint16_t cur_st = vb_mem_read16(0x0500000C) & 0xF;
-        if (cur_st >= 4 && frame_count > 500 && frame_count % 150 == 0) {
-            uint16_t next = cur_st + 1;
-            if (next > 12) next = 4;
-            vb_mem_write16(0x0500000C, next);
-            fprintf(stderr, "  ** Cycling state %d->%d (frame %d)\n", cur_st, next, frame_count);
-        }
+        /* Let state 2 run naturally — game enters demo mode at ~frame 2100 */
     }
     /* Simulate Start press periodically to advance through menus */
     if ((frame_count >= 300 && frame_count <= 310) ||
@@ -391,6 +384,9 @@ int main(int argc, char **argv) {
      * VB runs ~20MHz / 50fps = ~400K cycles per frame. Each interrupt check
      * is roughly 1-5 instructions = 200K-80K checks per frame. */
     vb_interrupt_set_frame_ticks(5000);
+
+    /* Force-enable display so handler activates worlds */
+    vb_mem_write16(0x0005F812, 0x0302); /* DPCTRL: display on, both eyes */
 
     /* Force-set palettes for testing */
     vb_mem_write16(0x0005F830, 0xE4); /* GPLT0: 3,2,1,0 */
