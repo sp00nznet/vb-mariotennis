@@ -88,8 +88,7 @@ static bool on_frame(void) {
     vb_platform_present(framebuffer);
 
     /* Auto-screenshot at key frames for debugging */
-    if (frame_count == 300 || frame_count == 350 || frame_count == 400 ||
-        frame_count == 500 || frame_count == 600 || frame_count == 800) {
+    if (frame_count % 200 == 100) { /* every 200 frames starting at 100 */
         char fname[64];
         snprintf(fname, sizeof(fname), "auto_%04d.png", frame_count);
         /* Convert RGBA8888 (R=high byte) to RGBA bytes for stbi */
@@ -106,6 +105,43 @@ static bool on_frame(void) {
             stbi_write_png(fname, 384, 224, 4, px, 384 * 4);
             fprintf(stderr, "Auto-screenshot: %s\n", fname);
             free(px);
+        }
+    }
+
+    /* Dump display tables and ALL worlds at key frames */
+    if (frame_count == 800) {
+        fprintf(stderr, "Display table at frame %d (state=%d):\n", frame_count,
+                vb_mem_read16(0x0500000C) & 0xF);
+        for (int phase = 0; phase < 12; phase++) {
+            uint32_t entry = 0x050022CC + phase * 96;
+            uint8_t flag = vb_mem_read8(entry);
+            if (flag != 0) {
+                fprintf(stderr, "  Phase %d: flag=%02X\n", phase, flag);
+                fprintf(stderr, "    bytes 0-31: ");
+                for (int b = 0; b < 32; b++) fprintf(stderr, "%02X ", vb_mem_read8(entry + b));
+                fprintf(stderr, "\n    bytes 32-63: ");
+                for (int b = 32; b < 64; b++) fprintf(stderr, "%02X ", vb_mem_read8(entry + b));
+                fprintf(stderr, "\n    bytes 64-95: ");
+                for (int b = 64; b < 96; b++) fprintf(stderr, "%02X ", vb_mem_read8(entry + b));
+                fprintf(stderr, "\n");
+            } else {
+                fprintf(stderr, "  Phase %d: EMPTY\n", phase);
+            }
+        }
+        /* Dump ALL 32 world entries */
+        fprintf(stderr, "All worlds at frame %d:\n", frame_count);
+        for (int w = 31; w >= 0; w--) {
+            uint32_t wa = 0x3D800 + w * 32;
+            uint16_t head = vb_mem_read16(wa);
+            if (head != 0) {
+                int16_t gx = (int16_t)vb_mem_read16(wa + 2);
+                int16_t gy = (int16_t)vb_mem_read16(wa + 6);
+                uint16_t ww = vb_mem_read16(wa + 14);
+                uint16_t wh = vb_mem_read16(wa + 16);
+                uint16_t param = vb_mem_read16(wa + 18);
+                fprintf(stderr, "  W%2d: HEAD=%04X GX=%d GY=%d W=%d H=%d PARAM=%04X\n",
+                        w, head, gx, gy, ww, wh, param);
+            }
         }
     }
 
@@ -212,14 +248,26 @@ static bool on_frame(void) {
             vb_mem_write8(0x05002285, 4);
             fprintf(stderr, "  ** Forced counter to 4\n");
         }
-        /* Force state progression if stuck */
-        if (frame_count > 500 && cur_st == 2) {
+        /* Force state progression if stuck too long */
+        if (frame_count > 400 && cur_st == 2) {
             vb_mem_write16(0x0500000C, 4);
-            fprintf(stderr, "  ** Forced state to 4\n");
+            fprintf(stderr, "  ** Forced state 2->4\n");
         }
     }
-    /* Simulate Start press at frame 600 to advance past loading */
-    if (frame_count >= 600 && frame_count <= 610) {
+    /* Cycle through game states to find one with character rendering */
+    {
+        uint16_t cur_st = vb_mem_read16(0x0500000C) & 0xF;
+        if (cur_st >= 4 && frame_count > 500 && frame_count % 150 == 0) {
+            uint16_t next = cur_st + 1;
+            if (next > 12) next = 4;
+            vb_mem_write16(0x0500000C, next);
+            fprintf(stderr, "  ** Cycling state %d->%d (frame %d)\n", cur_st, next, frame_count);
+        }
+    }
+    /* Simulate Start press periodically to advance through menus */
+    if ((frame_count >= 300 && frame_count <= 310) ||
+        (frame_count >= 600 && frame_count <= 610) ||
+        (frame_count >= 800 && frame_count <= 810)) {
         vb_gamepad_set_buttons(vb_platform_get_buttons() | VB_BTN_STA);
     }
     if (frame_count % 60 == 1) {
