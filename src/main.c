@@ -17,11 +17,16 @@ extern void vb_func_07F8135C_real(void);
 void vb_func_07F8135C(void) {
     static int call_count = 0;
     call_count++;
+    uint32_t dst_before = vb_cpu.r[7];
     if (call_count <= 30) {
-        fprintf(stderr, "TILE COPY #%d: dst=0x%08X src=0x%08X size=0x%X (frame %d)\n",
+        fprintf(stderr, "TILE COPY #%d: dst=0x%08X src=0x%08X r8=0x%X (frame %d)\n",
                 call_count, vb_cpu.r[7], vb_cpu.r[6], vb_cpu.r[8], frame_count);
     }
     vb_func_07F8135C_real();
+    uint32_t bytes_written = vb_cpu.r[7] - dst_before;
+    if (call_count <= 30) {
+        fprintf(stderr, "  -> wrote %d bytes (r7 now 0x%08X)\n", bytes_written, vb_cpu.r[7]);
+    }
 }
 
 /*
@@ -51,7 +56,6 @@ void vb_func_07F8016C(void) {
     /* Restore PSW after interrupt handler (it does RETI internally) */
 
     /* Call frame callback for rendering/input */
-    frame_count++;
     on_frame();
 }
 
@@ -77,7 +81,29 @@ static bool on_frame(void) {
     vb_vip_render(framebuffer, 0);
     vb_platform_present(framebuffer);
 
-    /* Dump VRAM once at frame 100 */
+    /* Auto-screenshot at key frames for debugging */
+    if (frame_count == 300 || frame_count == 350 || frame_count == 400 ||
+        frame_count == 500 || frame_count == 600 || frame_count == 800) {
+        char fname[64];
+        snprintf(fname, sizeof(fname), "auto_%04d.png", frame_count);
+        /* Convert RGBA8888 (R=high byte) to RGBA bytes for stbi */
+        uint8_t *px = (uint8_t *)malloc(384 * 224 * 4);
+        if (px) {
+            for (int i = 0; i < 384 * 224; i++) {
+                uint32_t c = framebuffer[i];
+                px[i*4+0] = (c >> 24) & 0xFF; /* R */
+                px[i*4+1] = 0;                 /* G */
+                px[i*4+2] = 0;                 /* B */
+                px[i*4+3] = c & 0xFF;          /* A */
+            }
+            extern int stbi_write_png(const char *, int, int, int, const void *, int);
+            stbi_write_png(fname, 384, 224, 4, px, 384 * 4);
+            fprintf(stderr, "Auto-screenshot: %s\n", fname);
+            free(px);
+        }
+    }
+
+    /* Dump VRAM once at frame 300 */
     if (frame_count == 300) {
         FILE *vf = fopen("vram_dump.txt", "w");
         if (vf) {
@@ -104,7 +130,7 @@ static bool on_frame(void) {
                     int16_t gy = (int16_t)vb_mem_read16(wa + 6);
                     uint16_t ww = vb_mem_read16(wa + 14);
                     uint16_t wh = vb_mem_read16(wa + 16);
-                    uint16_t param = vb_mem_read16(wa + 28);
+                    uint16_t param = vb_mem_read16(wa + 18);
                     fprintf(vf, "  World %d: HEAD=%04X GX=%d GY=%d W=%d H=%d PARAM=%04X\n",
                             w, head, gx, gy, ww, wh, param);
                 }
@@ -113,10 +139,28 @@ static bool on_frame(void) {
             fprintf(vf, "\nPalettes: GPLT0=%04X GPLT1=%04X GPLT2=%04X GPLT3=%04X\n",
                     vb_mem_read16(0x0005F830), vb_mem_read16(0x0005F832),
                     vb_mem_read16(0x0005F834), vb_mem_read16(0x0005F836));
+            fprintf(vf, "          JPLT0=%04X JPLT1=%04X JPLT2=%04X JPLT3=%04X\n",
+                    vb_mem_read16(0x0005F838), vb_mem_read16(0x0005F83A),
+                    vb_mem_read16(0x0005F83C), vb_mem_read16(0x0005F83E));
             fprintf(vf, "BKCOL=%04X DPCTRL=%04X BRTA=%04X BRTB=%04X BRTC=%04X\n",
                     vb_mem_read16(0x0005F840), vb_mem_read16(0x0005F812),
                     vb_mem_read16(0x0005F814), vb_mem_read16(0x0005F816),
                     vb_mem_read16(0x0005F818));
+            fprintf(vf, "SPT0=%04X SPT1=%04X SPT2=%04X SPT3=%04X\n",
+                    vb_mem_read16(0x0005F824), vb_mem_read16(0x0005F826),
+                    vb_mem_read16(0x0005F828), vb_mem_read16(0x0005F82A));
+            /* OAM sample */
+            fprintf(vf, "\nOAM (first 16 objects):\n");
+            for (int o = 0; o < 16; o++) {
+                uint32_t oa = 0x3E000 + o * 8;
+                uint16_t h0 = vb_mem_read16(oa);
+                uint16_t h1 = vb_mem_read16(oa + 2);
+                uint16_t h2 = vb_mem_read16(oa + 4);
+                uint16_t h3 = vb_mem_read16(oa + 6);
+                if (h0 || h1 || h2 || h3) {
+                    fprintf(vf, "  OBJ %d: %04X %04X %04X %04X\n", o, h0, h1, h2, h3);
+                }
+            }
             fclose(vf);
         }
         /* Write raw VRAM binary */
@@ -153,12 +197,19 @@ static bool on_frame(void) {
     if (frame_count % 30 == 1) {
         uint8_t counter_2285 = vb_mem_read8(0x05002285);
         uint16_t cur_st = vb_mem_read16(0x0500000C) & 0xF;
-        fprintf(stderr, "  F%d: counter=%d state=%d\n", frame_count, counter_2285, cur_st);
+        fprintf(stderr, "  F%d: counter=%d state=%d dpctrl=%04X brta=%02X wram18=%04X wram1A=%04X\n",
+                frame_count, counter_2285, cur_st,
+                vb_mem_read16(0x0005F812), vb_mem_read16(0x0005F814),
+                vb_mem_read16(0x05000018), vb_mem_read16(0x0500001A));
         /* Force counter advancement if stuck */
         if (frame_count > 200 && counter_2285 < 4 && cur_st == 1) {
             vb_mem_write8(0x05002285, 4);
             fprintf(stderr, "  ** Forced counter to 4\n");
         }
+    }
+    /* Simulate Start press at frame 600 to advance past loading */
+    if (frame_count >= 600 && frame_count <= 610) {
+        vb_gamepad_set_buttons(vb_platform_get_buttons() | VB_BTN_STA);
     }
     if (frame_count % 60 == 1) {
         uint16_t state = vb_mem_read16(0x0500000C);
