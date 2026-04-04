@@ -54,7 +54,7 @@ void vb_func_07F8016C(void) {
     vb_vip_frame_advance();
 
     /* Re-enable VIP interrupts (the handler clears INTENB) */
-    vb_mem_write16(0x0005F802, 0x4018); /* INTENB at offset 0x02 — correct */
+    vb_mem_write16(0x0005F802, 0x4018);
 
     /* Call the VIP interrupt handler directly to set frame flags */
     vb_func_07F800AA();
