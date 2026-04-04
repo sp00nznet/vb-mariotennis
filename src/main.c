@@ -54,21 +54,12 @@ void vb_func_07F8016C(void) {
     vb_vip_frame_advance();
 
     /* Re-enable VIP interrupts (the handler clears INTENB) */
-    vb_mem_write16(0x0005F802, 0x4018);
+    vb_mem_write16(0x0005F802, 0x4018); /* INTENB at offset 0x02 — correct */
 
     /* Call the VIP interrupt handler directly to set frame flags */
     vb_func_07F800AA();
 
-    /* Debug: check world 4 after handler */
-    static int dbg_w4 = 0;
-    if (frame_count > 250 && dbg_w4 < 20) {
-        uint16_t w4_head = vb_mem_read16(0x0003D880);
-        uint16_t w31_head = vb_mem_read16(0x0003DBE0);
-        fprintf(stderr, "POST-HANDLER F%d: W4=%04X W31=%04X\n", frame_count, w4_head, w31_head);
-        dbg_w4++;
-    }
-
-    /* Call frame callback for rendering/input */
+    /* Render after handler has updated world attributes */
     on_frame();
 }
 
@@ -95,7 +86,8 @@ static bool on_frame(void) {
     vb_platform_present(framebuffer);
 
     /* Auto-screenshot at key frames for debugging */
-    if (frame_count % 200 == 100) { /* every 200 frames starting at 100 */
+    if ((frame_count >= 2100 && frame_count <= 2500 && frame_count % 10 == 0) ||
+        frame_count % 200 == 100) {
         char fname[64];
         snprintf(fname, sizeof(fname), "auto_%04d.png", frame_count);
         /* Convert RGBA8888 (R=high byte) to RGBA bytes for stbi */
@@ -385,18 +377,18 @@ int main(int argc, char **argv) {
      * is roughly 1-5 instructions = 200K-80K checks per frame. */
     vb_interrupt_set_frame_ticks(5000);
 
-    /* Force-enable display so handler activates worlds */
-    vb_mem_write16(0x0005F812, 0x0302); /* DPCTRL: display on, both eyes */
+    /* Force-enable display (corrected DPCTRL offset) */
+    vb_mem_write16(0x0005F822, 0x0302); /* DPCTRL: display on */
 
-    /* Force-set palettes for testing */
-    vb_mem_write16(0x0005F830, 0xE4); /* GPLT0: 3,2,1,0 */
-    vb_mem_write16(0x0005F832, 0xE4); /* GPLT1 */
-    vb_mem_write16(0x0005F834, 0xE4); /* GPLT2 */
-    vb_mem_write16(0x0005F836, 0xE4); /* GPLT3 */
-    vb_mem_write16(0x0005F838, 0xE4); /* JPLT0 */
-    vb_mem_write16(0x0005F83A, 0xE4); /* JPLT1 */
-    vb_mem_write16(0x0005F83C, 0xE4); /* JPLT2 */
-    vb_mem_write16(0x0005F83E, 0xE4); /* JPLT3 */
+    /* Force-set palettes (corrected register offsets) */
+    vb_mem_write16(0x0005F860, 0xE4); /* GPLT0 */
+    vb_mem_write16(0x0005F862, 0xE4); /* GPLT1 */
+    vb_mem_write16(0x0005F864, 0xE4); /* GPLT2 */
+    vb_mem_write16(0x0005F866, 0xE4); /* GPLT3 */
+    vb_mem_write16(0x0005F868, 0xE4); /* JPLT0 */
+    vb_mem_write16(0x0005F86A, 0xE4); /* JPLT1 */
+    vb_mem_write16(0x0005F86C, 0xE4); /* JPLT2 */
+    vb_mem_write16(0x0005F86E, 0xE4); /* JPLT3 */
 
     /* Game main loop — dispatch state handlers until game progresses.
      * Each handler runs for its duration (many frames with VBlank waits)
