@@ -70,7 +70,13 @@ void vb_func_07F8016C(void) {
  * We just return immediately since drawing is instantaneous.
  */
 void vb_func_07F80186(void) {
-    /* Nothing to wait for — drawing is instant in recomp */
+    /* On real VB, this waits for the drawing engine to finish.
+     * Log calls to understand the game's draw timing. */
+    static int xp_wait_count = 0;
+    xp_wait_count++;
+    if (xp_wait_count <= 20) {
+        fprintf(stderr, "XPSTTS_WAIT called (count=%d, frame=%d)\n", xp_wait_count, frame_count);
+    }
 }
 
 /* Called once per frame from within the game loop */
