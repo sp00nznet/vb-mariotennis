@@ -2,3 +2,4 @@
 *.vb
 build/
 .vs/
+auto_*.png
