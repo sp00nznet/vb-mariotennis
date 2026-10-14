@@ -3,3 +3,7 @@
 build/
 .vs/
 auto_*.png
+
+# Generated from the game or taken from it: made locally, never
+# committed (REPO_RULES section 3)
+generated/
